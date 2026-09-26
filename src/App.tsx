@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -1370,9 +1370,44 @@ function AccountDetail({
 
 // ─── App Root ──────────────────────────────────────────────────────────────────
 
+const STORAGE_KEY = "job-time-income-dashboard:v1";
+
 export default function App() {
-  const [accounts, setAccounts] = useState<Account[]>(SEED_ACCOUNTS);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed.accounts)) return parsed.accounts as Account[];
+      }
+    } catch (e) {
+      // ignore parse errors and fall back to seed
+    }
+    return SEED_ACCOUNTS;
+  });
+
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed.selectedId ?? null;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  });
+
+  // Persist state to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      const payload = JSON.stringify({ accounts, selectedId });
+      localStorage.setItem(STORAGE_KEY, payload);
+    } catch (e) {
+      // storage might be full or unavailable — ignore to avoid crashing
+    }
+  }, [accounts, selectedId]);
 
   const currentAccount = selectedId
     ? (accounts.find((a) => a.id === selectedId) ?? null)

@@ -1,0 +1,10 @@
+{
+  "description": "Track and manage job hours and income with an intuitive dashboard, providing users insights into earnings and work sessions for better financial accountability.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
