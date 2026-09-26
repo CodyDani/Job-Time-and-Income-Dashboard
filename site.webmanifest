@@ -1,0 +1,13 @@
+{
+  "name": "Job Time and Income Dashboard",
+  "short_name": "Job Dashboard",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#6366f1",
+  "description": "Track your work sessions and payouts.",
+  "icons": [
+    { "src": "/favicon-32x32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/favicon-16x16.png", "sizes": "16x16", "type": "image/png" }
+  ]
+}
