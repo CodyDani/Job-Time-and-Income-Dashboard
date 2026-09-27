@@ -504,6 +504,84 @@ function AddPayoutModal({
   );
 }
 
+function StartJobModal({
+  onClose,
+  onSave,
+}: {
+  onClose: () => void;
+  onSave: (date: string) => void;
+}) {
+  const [date, setDate] = useState(TODAY);
+  const canSubmit = !!date;
+  return (
+    <Modal title="When did you start this Job?" onClose={onClose}>
+      <p className="text-sm mb-3" style={{ color: "var(--text-muted)" }}>
+        Tell me the date you started this Job so I can celebrate each week.
+      </p>
+      <Input
+        label="Start Date"
+        type="date"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+      />
+      <div className="flex gap-3 mt-5">
+        <BtnSecondary onClick={onClose} style={{ flex: 1 }}>
+          Cancel
+        </BtnSecondary>
+        <BtnPrimary
+          onClick={() => {
+            if (canSubmit) onSave(date);
+          }}
+          disabled={!canSubmit}
+          style={{ flex: 1 }}
+        >
+          Save Start Date
+        </BtnPrimary>
+      </div>
+    </Modal>
+  );
+}
+
+function CongratsModal({
+  weeks,
+  totalSecs,
+  totalPaid,
+  pending,
+  onClose,
+}: {
+  weeks: number;
+  totalSecs: number;
+  totalPaid: number;
+  pending: number;
+  onClose: () => void;
+}) {
+  return (
+    <Modal title="🎉 Weekly Milestone" onClose={onClose}>
+      <div className="text-center">
+        <p className="text-lg font-semibold">Congratulations!</p>
+        <p className="text-sm mt-2 text-muted">
+          You are {weeks} week{weeks !== 1 ? "s" : ""} on this Job.
+        </p>
+        <div className="mt-4">
+          <p style={{ fontFamily: "JetBrains Mono, monospace" }}>
+            Total Hours: {fmtHrsLabel(totalSecs)}
+          </p>
+          <p style={{ fontFamily: "JetBrains Mono, monospace" }}>
+            Total Received: {fmtCurrency(totalPaid)}
+          </p>
+          <p style={{ fontFamily: "JetBrains Mono, monospace" }}>
+            Pending Balance: {fmtCurrency(pending)}
+          </p>
+        </div>
+      </div>
+      <div style={{ position: "relative", height: 120, overflow: "visible" }}>
+        <div className="confetti-root" />
+      </div>
+      <style>{`\n        .confetti-root { position: absolute; inset: 0; pointer-events: none; }\n        .confetti-root::before { content: "🎊🎉🎊"; position: absolute; left:50%; transform: translateX(-50%); font-size: 32px; animation: pop 1200ms ease-out; }\n        @keyframes pop { 0% { transform: translate(-50%, -20px) scale(0.6); opacity: 0 } 50% { opacity: 1 } 100% { transform: translate(-50%, 0) scale(1); opacity: 1 } }\n      `}</style>
+    </Modal>
+  );
+}
+
 // ─── Screen 1: Overview Dashboard ────────────────────────────────────────────
 
 function OverviewDashboard({
@@ -1565,15 +1643,71 @@ export default function App() {
     return null;
   });
 
+  const [jobStartDate, setJobStartDate] = useState<string | null>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed.jobStartDate ?? null;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  });
+
+  const [lastCongratsShown, setLastCongratsShown] = useState<string | null>(
+    () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          return parsed.lastCongratsShown ?? null;
+        }
+      } catch (e) {
+        // ignore
+      }
+      return null;
+    },
+  );
+
+  const [showCongrats, setShowCongrats] = useState(false);
+
   // Persist state to localStorage whenever it changes
   useEffect(() => {
     try {
-      const payload = JSON.stringify({ accounts, selectedId });
+      const payload = JSON.stringify({
+        accounts,
+        selectedId,
+        jobStartDate,
+        lastCongratsShown,
+      });
       localStorage.setItem(STORAGE_KEY, payload);
     } catch (e) {
       // storage might be full or unavailable — ignore to avoid crashing
     }
-  }, [accounts, selectedId]);
+  }, [accounts, selectedId, jobStartDate, lastCongratsShown]);
+
+  // check weekly milestone and show congrats modal when appropriate
+  useEffect(() => {
+    if (!jobStartDate) return;
+    try {
+      const start = new Date(jobStartDate + "T00:00:00");
+      const now = new Date();
+      const days = Math.floor(
+        (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      if (days > 0 && days % 7 === 0) {
+        // only show once per day
+        if (lastCongratsShown !== TODAY) {
+          setShowCongrats(true);
+          setLastCongratsShown(TODAY);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  }, [jobStartDate, accounts, lastCongratsShown]);
 
   const currentAccount = selectedId
     ? (accounts.find((a) => a.id === selectedId) ?? null)
@@ -1591,6 +1725,18 @@ export default function App() {
         bonuses: [],
       },
     ]);
+  }
+
+  function setStartDate(date: string) {
+    setJobStartDate(date);
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      parsed.jobStartDate = date;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+    } catch (e) {
+      // ignore
+    }
   }
 
   function addSession(session: Omit<WorkSession, "id">) {
@@ -1675,26 +1821,116 @@ export default function App() {
   }
 
   if (currentAccount) {
+    const totalSecsAll = accounts.reduce(
+      (a, acc) => a + accountTotalSecs(acc),
+      0,
+    );
+    const totalPaidAll = accounts.reduce(
+      (a, acc) => a + accountTotalPaid(acc) + accountTotalBonuses(acc),
+      0,
+    );
+    const pendingAll = accounts.reduce(
+      (a, acc) => a + accountPendingBalance(acc),
+      0,
+    );
+    let weeks = 0;
+    if (jobStartDate) {
+      try {
+        const start = new Date(jobStartDate + "T00:00:00");
+        const now = new Date();
+        const days = Math.floor(
+          (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+        );
+        weeks = Math.floor(days / 7);
+      } catch (e) {
+        weeks = 0;
+      }
+    }
+
     return (
-      <AccountDetail
-        account={currentAccount}
-        onBack={() => setSelectedId(null)}
-        onAddSession={addSession}
-        onAddPayout={addPayout}
-        onAddBonus={addBonus}
-        onUpdateRate={updateAccountRate}
-        onUpdateSession={updateSession}
-        onDeleteSession={deleteSession}
-      />
+      <>
+        <AccountDetail
+          account={currentAccount}
+          onBack={() => setSelectedId(null)}
+          onAddSession={addSession}
+          onAddPayout={addPayout}
+          onAddBonus={addBonus}
+          onUpdateRate={updateAccountRate}
+          onUpdateSession={updateSession}
+          onDeleteSession={deleteSession}
+        />
+        {jobStartDate === null && (
+          <StartJobModal
+            onClose={() => setStartDate(TODAY)}
+            onSave={(d) => {
+              setStartDate(d);
+            }}
+          />
+        )}
+        {showCongrats && jobStartDate && (
+          <CongratsModal
+            weeks={weeks}
+            totalSecs={totalSecsAll}
+            totalPaid={totalPaidAll}
+            pending={pendingAll}
+            onClose={() => setShowCongrats(false)}
+          />
+        )}
+      </>
     );
   }
 
+  const totalSecsAll = accounts.reduce(
+    (a, acc) => a + accountTotalSecs(acc),
+    0,
+  );
+  const totalPaidAll = accounts.reduce(
+    (a, acc) => a + accountTotalPaid(acc) + accountTotalBonuses(acc),
+    0,
+  );
+  const pendingAll = accounts.reduce(
+    (a, acc) => a + accountPendingBalance(acc),
+    0,
+  );
+  let weeks = 0;
+  if (jobStartDate) {
+    try {
+      const start = new Date(jobStartDate + "T00:00:00");
+      const now = new Date();
+      const days = Math.floor(
+        (now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      weeks = Math.floor(days / 7);
+    } catch (e) {
+      weeks = 0;
+    }
+  }
+
   return (
-    <OverviewDashboard
-      accounts={accounts}
-      onAddAccount={addAccount}
-      onViewAccount={(a) => setSelectedId(a.id)}
-      onUpdateRate={updateAccountRate}
-    />
+    <>
+      <OverviewDashboard
+        accounts={accounts}
+        onAddAccount={addAccount}
+        onViewAccount={(a) => setSelectedId(a.id)}
+        onUpdateRate={updateAccountRate}
+      />
+      {jobStartDate === null && (
+        <StartJobModal
+          onClose={() => setStartDate(TODAY)}
+          onSave={(d) => {
+            setStartDate(d);
+          }}
+        />
+      )}
+      {showCongrats && jobStartDate && (
+        <CongratsModal
+          weeks={weeks}
+          totalSecs={totalSecsAll}
+          totalPaid={totalPaidAll}
+          pending={pendingAll}
+          onClose={() => setShowCongrats(false)}
+        />
+      )}
+    </>
   );
 }
