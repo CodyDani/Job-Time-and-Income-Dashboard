@@ -589,11 +589,15 @@ function OverviewDashboard({
   onAddAccount,
   onViewAccount,
   onUpdateRate,
+  theme,
+  onToggleTheme,
 }: {
   accounts: Account[];
   onAddAccount: (name: string, rate: number) => void;
   onViewAccount: (a: Account) => void;
   onUpdateRate: (id: string, rate: number) => void;
+  theme: "dark" | "light";
+  onToggleTheme: () => void;
 }) {
   const [showModal, setShowModal] = useState(false);
 
@@ -613,13 +617,13 @@ function OverviewDashboard({
         className="sticky top-0 z-20 flex items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3.5 border-b"
         style={{
           borderColor: "var(--border)",
-          background: "rgba(7,8,12,0.92)",
+          background: "var(--header-bg)",
           backdropFilter: "blur(14px)",
         }}
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <div
-            className="w-7 h-7 rounded-lg flex-shrink-0 flex items-center justify-center text-white text-xs font-bold"
+            className="w-7 h-7 rounded-lg shrink-0 flex items-center justify-center text-white text-xs font-bold"
             style={{ background: "var(--primary)" }}
           >
             JM
@@ -631,13 +635,24 @@ function OverviewDashboard({
             Job Manager
           </span>
         </div>
-        <BtnPrimary
-          onClick={() => setShowModal(true)}
-          className="flex-shrink-0 text-xs sm:text-sm"
-        >
-          <span className="hidden sm:inline">+ Add New Account</span>
-          <span className="sm:hidden">+ Add</span>
-        </BtnPrimary>
+
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="hidden md:block">
+            <BtnSecondary>📥 Download CSV Statement</BtnSecondary>
+          </div>
+          <button
+            onClick={onToggleTheme}
+            className="px-3 py-2 rounded-lg text-xs sm:text-sm transition-opacity hover:opacity-85"
+            style={{
+              background: "transparent",
+              border: "1px solid var(--border)",
+              color: "var(--text)",
+            }}
+            aria-label="Toggle theme"
+          >
+            {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
+          </button>
+        </div>
       </header>
 
       <main className="px-4 sm:px-6 lg:px-8 py-6 sm:py-8 max-w-7xl mx-auto">
@@ -1016,7 +1031,7 @@ function AccountDetail({
         className="sticky top-0 z-20 border-b px-4 sm:px-6 lg:px-8 py-3 sm:py-3.5"
         style={{
           borderColor: "var(--border)",
-          background: "rgba(7,8,12,0.92)",
+          background: "var(--header-bg)",
           backdropFilter: "blur(14px)",
         }}
       >
@@ -1617,6 +1632,29 @@ function AccountDetail({
 const STORAGE_KEY = "job-time-income-dashboard:v1";
 
 export default function App() {
+  const [theme, setTheme] = useState<"dark" | "light">(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return parsed.theme ?? "dark";
+      }
+    } catch (e) {
+      // ignore
+    }
+    return "dark";
+  });
+
+  useEffect(() => {
+    try {
+      document.documentElement.setAttribute(
+        "data-theme",
+        theme === "light" ? "light" : "dark",
+      );
+    } catch (e) {
+      // ignore
+    }
+  }, [theme]);
   const [accounts, setAccounts] = useState<Account[]>(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
@@ -1913,6 +1951,8 @@ export default function App() {
         onAddAccount={addAccount}
         onViewAccount={(a) => setSelectedId(a.id)}
         onUpdateRate={updateAccountRate}
+        theme={theme}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
       {jobStartDate === null && (
         <StartJobModal
