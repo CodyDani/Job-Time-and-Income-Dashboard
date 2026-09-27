@@ -16,12 +16,19 @@ interface Payout {
   date: string;
 }
 
+interface Bonus {
+  id: string;
+  amount: number;
+  date: string;
+}
+
 interface Account {
   id: string;
   name: string;
   ratePerHour: number;
   sessions: WorkSession[];
   payouts: Payout[];
+  bonuses: Bonus[];
 }
 
 type TimeFilter = "today" | "week" | "month" | "all";
@@ -100,7 +107,11 @@ function accountTotalSecs(acc: Account): number {
 }
 
 function accountTotalPaid(acc: Account): number {
-  return acc.payouts.reduce((a, p) => a + p.amount, 0);
+  return (acc.payouts ?? []).reduce((a, p) => a + p.amount, 0);
+}
+
+function accountTotalBonuses(acc: Account): number {
+  return (acc.bonuses ?? []).reduce((a, b) => a + b.amount, 0);
 }
 
 function accountPendingBalance(acc: Account): number {
@@ -367,18 +378,24 @@ function AddAccountModal({
 function LogSessionModal({
   onClose,
   onSave,
+  initialSession,
+  title = "Add Work Session",
+  submitLabel = "Save Session",
 }: {
   onClose: () => void;
   onSave: (s: Omit<WorkSession, "id">) => void;
+  initialSession?: Partial<WorkSession>;
+  title?: string;
+  submitLabel?: string;
 }) {
   // Previously should be the default. Date is optional — empty means "Previously".
-  const [date, setDate] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [date, setDate] = useState(initialSession?.date ?? "");
+  const [from, setFrom] = useState(initialSession?.fromTime ?? "");
+  const [to, setTo] = useState(initialSession?.toTime ?? "");
   const canSubmit = from && to;
 
   return (
-    <Modal title="Add Work Session" onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
       <p className="text-xs mb-3" style={{ color: "var(--text-muted)" }}>
         Leave date empty to mark session as "Previously" (default). Enter times
         in
@@ -425,7 +442,7 @@ function LogSessionModal({
           disabled={!canSubmit}
           style={{ flex: 1 }}
         >
-          Save Session
+          {submitLabel}
         </BtnPrimary>
       </div>
     </Modal>
@@ -435,18 +452,22 @@ function LogSessionModal({
 function AddPayoutModal({
   onClose,
   onSave,
+  title = "Record Payment Received",
+  buttonLabel = "Record Payout",
 }: {
   onClose: () => void;
   onSave: (amount: number, date: string) => void;
+  title?: string;
+  buttonLabel?: string;
 }) {
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(TODAY);
   const canSubmit = parseFloat(amount) > 0 && date;
 
   return (
-    <Modal title="Record Payment Received" onClose={onClose}>
+    <Modal title={title} onClose={onClose}>
       <Input
-        label="Amount Paid (₦)"
+        label="Amount (₦)"
         placeholder="0.00"
         type="number"
         min="0"
@@ -455,7 +476,7 @@ function AddPayoutModal({
         onChange={(e) => setAmount(e.target.value)}
       />
       <Input
-        label="Date Received"
+        label="Date"
         type="date"
         value={date}
         onChange={(e) => setDate(e.target.value)}
@@ -469,9 +490,14 @@ function AddPayoutModal({
             if (canSubmit) onSave(parseFloat(amount), date);
           }}
           disabled={!canSubmit}
-          style={{ flex: 1, background: "var(--green)" }}
+          style={{
+            flex: 1,
+            background: title.includes("Bonus")
+              ? "var(--amber)"
+              : "var(--green)",
+          }}
         >
-          Record Payout
+          {buttonLabel}
         </BtnPrimary>
       </div>
     </Modal>
@@ -495,7 +521,11 @@ function OverviewDashboard({
 
   const totalSecs = accounts.reduce((a, acc) => a + accountTotalSecs(acc), 0);
   const totalEverything = accounts.reduce(
-    (a, acc) => a + accountTotalPaid(acc) + accountPendingBalance(acc),
+    (a, acc) =>
+      a +
+      accountTotalPaid(acc) +
+      accountTotalBonuses(acc) +
+      accountPendingBalance(acc),
     0,
   );
 
@@ -551,7 +581,7 @@ function OverviewDashboard({
               {fmtCurrency(totalEverything)}
             </p>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              All received &amp; pending earnings
+              All received, bonuses, &amp; pending earnings
             </p>
           </Card>
 
@@ -787,8 +817,13 @@ function OverviewDashboard({
                     >
                       {acc.sessions.length} session
                       {acc.sessions.length !== 1 ? "s" : ""} ·{" "}
-                      {acc.payouts.length} payout
-                      {acc.payouts.length !== 1 ? "s" : ""}
+                      {(acc.payouts ?? []).length + (acc.bonuses ?? []).length}{" "}
+                      payment
+                      {(acc.payouts ?? []).length +
+                        (acc.bonuses ?? []).length !==
+                      1
+                        ? "s"
+                        : ""}
                     </span>
                     <button
                       className="text-xs font-medium flex items-center gap-1 transition-opacity hover:opacity-70"
@@ -828,19 +863,33 @@ function AccountDetail({
   onBack,
   onAddSession,
   onAddPayout,
+  onAddBonus,
   onUpdateRate,
+  onUpdateSession,
+  onDeleteSession,
 }: {
   account: Account;
   onBack: () => void;
   onAddSession: (s: Omit<WorkSession, "id">) => void;
   onAddPayout: (amount: number, date: string) => void;
+  onAddBonus: (amount: number, date: string) => void;
   onUpdateRate: (id: string, rate: number) => void;
+  onUpdateSession: (id: string, s: Omit<WorkSession, "id">) => void;
+  onDeleteSession: (id: string) => void;
 }) {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [sessionFilter, setSessionFilter] =
     useState<SessionFilter>("previously");
   const [showLogModal, setShowLogModal] = useState(false);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [showPayoutModal, setShowPayoutModal] = useState(false);
+  const [showBonusModal, setShowBonusModal] = useState(false);
+
+  const editingSession =
+    editingSessionId !== null
+      ? (account.sessions.find((session) => session.id === editingSessionId) ??
+        null)
+      : null;
 
   const filteredSecs = filterByTime(account.sessions, timeFilter).reduce(
     (a, s) => a + sessionDuration(s),
@@ -848,6 +897,7 @@ function AccountDetail({
   );
   const pending = accountPendingBalance(account);
   const totalPaid = accountTotalPaid(account);
+  const totalBonuses = accountTotalBonuses(account);
 
   const displayedSessions = useMemo(() => {
     let list = [...account.sessions].sort((a, b) =>
@@ -861,8 +911,18 @@ function AccountDetail({
   }, [account.sessions, sessionFilter]);
 
   const sortedPayouts = useMemo(
-    () => [...account.payouts].sort((a, b) => b.date.localeCompare(a.date)),
-    [account.payouts],
+    () =>
+      [
+        ...(account.payouts ?? []).map((payout) => ({
+          ...payout,
+          type: "payment" as const,
+        })),
+        ...(account.bonuses ?? []).map((bonus) => ({
+          ...bonus,
+          type: "bonus" as const,
+        })),
+      ].sort((a, b) => b.date.localeCompare(a.date)),
+    [account.payouts, account.bonuses],
   );
 
   const timeFilterOptions: { key: TimeFilter; label: string }[] = [
@@ -1059,20 +1119,33 @@ function AccountDetail({
                 Record Payment
               </p>
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-                Mark a payment you've received.
+                Log regular pay and one-off bonuses.
               </p>
             </div>
-            <button
-              onClick={() => setShowPayoutModal(true)}
-              className="mt-3 sm:mt-4 px-4 py-2.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-85"
-              style={{
-                background: "var(--green)",
-                color: "#fff",
-                width: "fit-content",
-              }}
-            >
-              + Add New Payout
-            </button>
+            <div className="mt-3 sm:mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => setShowPayoutModal(true)}
+                className="px-4 py-2.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-85"
+                style={{
+                  background: "var(--green)",
+                  color: "#fff",
+                  width: "fit-content",
+                }}
+              >
+                + Add New Payout
+              </button>
+              <button
+                onClick={() => setShowBonusModal(true)}
+                className="px-4 py-2.5 rounded-lg text-xs font-medium transition-opacity hover:opacity-85"
+                style={{
+                  background: "var(--amber)",
+                  color: "#fff",
+                  width: "fit-content",
+                }}
+              >
+                + Add Bonus
+              </button>
+            </div>
           </Card>
         </div>
 
@@ -1120,10 +1193,10 @@ function AccountDetail({
               <div className="overflow-x-auto">
                 <div style={{ minWidth: "480px" }}>
                   <div
-                    className="grid grid-cols-3 px-4 sm:px-5 py-3 border-b"
+                    className="grid grid-cols-[1.2fr_1.3fr_0.8fr_1.2fr] px-4 sm:px-5 py-3 border-b"
                     style={{ borderColor: "var(--border)" }}
                   >
-                    {["Date", "Time Frame", "Duration"].map((h) => (
+                    {["Date", "Time Frame", "Duration", "Actions"].map((h) => (
                       <span
                         key={h}
                         className="text-xs font-medium uppercase tracking-widest"
@@ -1148,7 +1221,7 @@ function AccountDetail({
                       return (
                         <div
                           key={session.id}
-                          className="grid grid-cols-3 px-4 sm:px-5 py-3.5 items-center border-b transition-colors hover:bg-[var(--surface-2)]"
+                          className="grid grid-cols-[1.2fr_1.3fr_0.8fr_1.2fr] px-4 sm:px-5 py-3.5 items-center border-b transition-colors hover:bg-[var(--surface-2)]"
                           style={{ borderColor: "var(--border)" }}
                         >
                           <span
@@ -1183,6 +1256,40 @@ function AccountDetail({
                           >
                             {fmtDuration(dur)}
                           </span>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setEditingSessionId(session.id)}
+                              className="px-2 py-1 rounded-md text-[10px] font-medium border transition-opacity hover:opacity-80"
+                              style={{
+                                borderColor: "var(--border)",
+                                background: "var(--surface)",
+                                color: "var(--text-muted)",
+                              }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (
+                                  window.confirm(
+                                    "Delete this work session? This cannot be undone.",
+                                  )
+                                ) {
+                                  onDeleteSession(session.id);
+                                }
+                              }}
+                              className="px-2 py-1 rounded-md text-[10px] font-medium border transition-opacity hover:opacity-80"
+                              style={{
+                                borderColor: "rgba(239,68,68,0.3)",
+                                background: "rgba(239,68,68,0.08)",
+                                color: "#fca5a5",
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
                         </div>
                       );
                     })
@@ -1253,12 +1360,15 @@ function AccountDetail({
                   style={{ color: "var(--text-muted)" }}
                 >
                   <span className="text-2xl mb-3">💳</span>
-                  <p className="text-sm mb-1">No payouts recorded yet</p>
+                  <p className="text-sm mb-1">
+                    No payouts or bonuses recorded yet
+                  </p>
                   <p
                     className="text-xs mb-4"
                     style={{ color: "var(--text-muted)" }}
                   >
-                    Mark payments as received to track your earnings.
+                    Mark regular payments and any bonuses to track your
+                    earnings.
                   </p>
                   <button
                     onClick={() => setShowPayoutModal(true)}
@@ -1270,17 +1380,23 @@ function AccountDetail({
                 </div>
               ) : (
                 <div className="py-2">
-                  {sortedPayouts.map((payout, i) => (
+                  {sortedPayouts.map((entry, i) => (
                     <div
-                      key={payout.id}
+                      key={entry.id}
                       className="flex items-stretch gap-3 px-4 sm:px-5 py-3 transition-colors hover:bg-[var(--surface-2)]"
                     >
                       <div className="flex flex-col items-center pt-1 flex-shrink-0">
                         <div
                           className="w-2.5 h-2.5 rounded-full flex-shrink-0"
                           style={{
-                            background: "var(--green)",
-                            boxShadow: "0 0 8px rgba(34,197,94,0.5)",
+                            background:
+                              entry.type === "bonus"
+                                ? "var(--amber)"
+                                : "var(--green)",
+                            boxShadow:
+                              entry.type === "bonus"
+                                ? "0 0 8px rgba(245,158,11,0.5)"
+                                : "0 0 8px rgba(34,197,94,0.5)",
                           }}
                         />
                         {i < sortedPayouts.length - 1 && (
@@ -1300,44 +1416,71 @@ function AccountDetail({
                             style={{
                               fontFamily: "JetBrains Mono, monospace",
                               fontSize: "14px",
-                              color: "var(--green)",
+                              color:
+                                entry.type === "bonus"
+                                  ? "var(--amber)"
+                                  : "var(--green)",
                             }}
                           >
-                            +{fmtCurrency(payout.amount)}
+                            {entry.type === "bonus" ? "+" : "+"}
+                            {fmtCurrency(entry.amount)}
                           </span>
-                          <Pill color="green">Received</Pill>
+                          <Pill
+                            color={entry.type === "bonus" ? "amber" : "green"}
+                          >
+                            {entry.type === "bonus" ? "Bonus" : "Received"}
+                          </Pill>
                         </div>
                         <p
                           className="text-xs"
                           style={{ color: "var(--text-muted)" }}
                         >
-                          {fmtDate(payout.date)}
+                          {fmtDate(entry.date)}
                         </p>
                       </div>
                     </div>
                   ))}
                   <div
-                    className="flex items-center justify-between px-4 sm:px-5 py-3 mt-1 border-t"
+                    className="px-4 sm:px-5 py-3 mt-1 border-t"
                     style={{
                       borderColor: "var(--border)",
                       background: "var(--surface-2)",
                     }}
                   >
-                    <span
-                      className="text-xs"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      Total Received
-                    </span>
-                    <span
-                      className="font-semibold text-sm"
-                      style={{
-                        fontFamily: "JetBrains Mono, monospace",
-                        color: "var(--green)",
-                      }}
-                    >
-                      {fmtCurrency(totalPaid)}
-                    </span>
+                    <div className="flex items-center justify-between mb-2">
+                      <span
+                        className="text-xs"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        Total Payments
+                      </span>
+                      <span
+                        className="font-semibold text-sm"
+                        style={{
+                          fontFamily: "JetBrains Mono, monospace",
+                          color: "var(--green)",
+                        }}
+                      >
+                        {fmtCurrency(totalPaid)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span
+                        className="text-xs"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        Total Bonuses
+                      </span>
+                      <span
+                        className="font-semibold text-sm"
+                        style={{
+                          fontFamily: "JetBrains Mono, monospace",
+                          color: "var(--amber)",
+                        }}
+                      >
+                        {fmtCurrency(totalBonuses)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1355,12 +1498,35 @@ function AccountDetail({
           }}
         />
       )}
+      {editingSession && (
+        <LogSessionModal
+          title="Edit Work Session"
+          submitLabel="Update Session"
+          initialSession={editingSession}
+          onClose={() => setEditingSessionId(null)}
+          onSave={(session) => {
+            onUpdateSession(editingSession.id, session);
+            setEditingSessionId(null);
+          }}
+        />
+      )}
       {showPayoutModal && (
         <AddPayoutModal
           onClose={() => setShowPayoutModal(false)}
           onSave={(amount, date) => {
             onAddPayout(amount, date);
             setShowPayoutModal(false);
+          }}
+        />
+      )}
+      {showBonusModal && (
+        <AddPayoutModal
+          title="Record Bonus Received"
+          buttonLabel="Record Bonus"
+          onClose={() => setShowBonusModal(false)}
+          onSave={(amount, date) => {
+            onAddBonus(amount, date);
+            setShowBonusModal(false);
           }}
         />
       )}
@@ -1416,7 +1582,14 @@ export default function App() {
   function addAccount(name: string, ratePerHour: number) {
     setAccounts((prev) => [
       ...prev,
-      { id: `${Date.now()}`, name, ratePerHour, sessions: [], payouts: [] },
+      {
+        id: `${Date.now()}`,
+        name,
+        ratePerHour,
+        sessions: [],
+        payouts: [],
+        bonuses: [],
+      },
     ]);
   }
 
@@ -1428,6 +1601,36 @@ export default function App() {
           ? {
               ...a,
               sessions: [...a.sessions, { ...session, id: `${Date.now()}` }],
+            }
+          : a,
+      ),
+    );
+  }
+
+  function updateSession(id: string, updatedSession: Omit<WorkSession, "id">) {
+    if (!selectedId) return;
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === selectedId
+          ? {
+              ...a,
+              sessions: a.sessions.map((session) =>
+                session.id === id ? { ...updatedSession, id } : session,
+              ),
+            }
+          : a,
+      ),
+    );
+  }
+
+  function deleteSession(id: string) {
+    if (!selectedId) return;
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === selectedId
+          ? {
+              ...a,
+              sessions: a.sessions.filter((session) => session.id !== id),
             }
           : a,
       ),
@@ -1448,6 +1651,23 @@ export default function App() {
     );
   }
 
+  function addBonus(amount: number, date: string) {
+    if (!selectedId) return;
+    setAccounts((prev) =>
+      prev.map((a) =>
+        a.id === selectedId
+          ? {
+              ...a,
+              bonuses: [
+                ...(a.bonuses ?? []),
+                { id: `${Date.now()}`, amount, date },
+              ],
+            }
+          : a,
+      ),
+    );
+  }
+
   function updateAccountRate(id: string, rate: number) {
     setAccounts((prev) =>
       prev.map((a) => (a.id === id ? { ...a, ratePerHour: rate } : a)),
@@ -1461,7 +1681,10 @@ export default function App() {
         onBack={() => setSelectedId(null)}
         onAddSession={addSession}
         onAddPayout={addPayout}
+        onAddBonus={addBonus}
         onUpdateRate={updateAccountRate}
+        onUpdateSession={updateSession}
+        onDeleteSession={deleteSession}
       />
     );
   }
