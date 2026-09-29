@@ -77,6 +77,33 @@ function fmtDate(dateStr: string): string {
   });
 }
 
+function dateToISO(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekStartDate(date: Date = new Date()): string {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return dateToISO(d);
+}
+
+function formatHoursNumber(hours: number): string {
+  const safeHours = Number.isFinite(hours) ? Math.max(0, hours) : 0;
+  const wholeHours = Math.floor(safeHours);
+  const minutes = Math.round((safeHours - wholeHours) * 60);
+  const normalizedMinutes = minutes === 60 ? 0 : minutes;
+  const normalizedHours = minutes === 60 ? wholeHours + 1 : wholeHours;
+
+  if (normalizedHours === 0 && normalizedMinutes === 0) return "0h";
+  if (normalizedMinutes === 0) return `${normalizedHours}h`;
+  if (normalizedHours === 0) return `${normalizedMinutes}m`;
+  return `${normalizedHours}h ${normalizedMinutes}m`;
+}
+
 function filterByTime(
   sessions: WorkSession[],
   filter: TimeFilter,
@@ -117,6 +144,16 @@ function accountTotalBonuses(acc: Account): number {
 function accountPendingBalance(acc: Account): number {
   const earned = (accountTotalSecs(acc) / 3600) * acc.ratePerHour;
   return Math.max(0, earned - accountTotalPaid(acc));
+}
+
+function getWeekTotalSecs(accounts: Account[]): number {
+  return accounts.reduce((total, acc) => {
+    const weeklySessions = filterByTime(acc.sessions, "week");
+    return (
+      total +
+      weeklySessions.reduce((sum, session) => sum + sessionDuration(session), 0)
+    );
+  }, 0);
 }
 
 // ─── Seed Data ────────────────────────────────────────────────────────────────
@@ -542,6 +579,59 @@ function StartJobModal({
   );
 }
 
+function WeeklyGoalModal({
+  defaultHours,
+  onClose,
+  onSave,
+  onReset,
+}: {
+  defaultHours: number | null;
+  onClose: () => void;
+  onSave: (hours: number) => void;
+  onReset: () => void;
+}) {
+  const [hours, setHours] = useState(
+    defaultHours !== null ? String(defaultHours) : "",
+  );
+  const parsed = Number.parseFloat(hours);
+  const canSubmit = Number.isFinite(parsed) && parsed >= 0;
+
+  return (
+    <Modal title="Set this week's target" onClose={onClose}>
+      <p className="text-sm mb-3" style={{ color: "var(--text-muted)" }}>
+        How many hours do you want to hit this week?
+      </p>
+      <Input
+        label="Weekly hours to hit"
+        type="number"
+        min="0"
+        step="0.5"
+        value={hours}
+        onChange={(e) => setHours(e.target.value)}
+      />
+      <div className="flex gap-3 mt-5">
+        <BtnSecondary onClick={onClose} style={{ flex: 1 }}>
+          Cancel
+        </BtnSecondary>
+        {defaultHours !== null && (
+          <BtnSecondary onClick={onReset} style={{ flex: 1 }}>
+            Reset
+          </BtnSecondary>
+        )}
+        <BtnPrimary
+          onClick={() => {
+            if (canSubmit) onSave(parsed);
+          }}
+          disabled={!canSubmit}
+          style={{ flex: 1 }}
+        >
+          {defaultHours !== null ? "Update Goal" : "Save Goal"}
+        </BtnPrimary>
+      </div>
+    </Modal>
+  );
+}
+
 function CongratsModal({
   weeks,
   totalSecs,
@@ -591,6 +681,8 @@ function OverviewDashboard({
   onUpdateRate,
   theme,
   onToggleTheme,
+  weeklyGoalHours,
+  onOpenWeeklyGoal,
 }: {
   accounts: Account[];
   onAddAccount: (name: string, rate: number) => void;
@@ -598,6 +690,8 @@ function OverviewDashboard({
   onUpdateRate: (id: string, rate: number) => void;
   theme: "dark" | "light";
   onToggleTheme: () => void;
+  weeklyGoalHours: number | null;
+  onOpenWeeklyGoal: () => void;
 }) {
   const [showModal, setShowModal] = useState(false);
 
@@ -610,6 +704,12 @@ function OverviewDashboard({
       accountPendingBalance(acc),
     0,
   );
+  const weekTotalSecs = getWeekTotalSecs(accounts);
+  const hoursWorked = weekTotalSecs / 3600;
+  const hoursLeft =
+    weeklyGoalHours === null
+      ? null
+      : Math.max(0, weeklyGoalHours - hoursWorked);
 
   return (
     <div className="min-h-screen" style={{ background: "var(--bg)" }}>
@@ -741,6 +841,109 @@ function OverviewDashboard({
               >
                 + New Account
               </button>
+            </div>
+          </Card>
+        </div>
+
+        <div className="mb-6 sm:mb-8">
+          <Card className="p-4 sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p
+                  className="text-xs font-medium uppercase tracking-widest"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Weekly hour to hit
+                </p>
+                <p
+                  className="text-2xl sm:text-3xl font-semibold mt-2"
+                  style={{
+                    fontFamily: "JetBrains Mono, monospace",
+                    color: "var(--text)",
+                  }}
+                >
+                  {weeklyGoalHours !== null
+                    ? formatHoursNumber(weeklyGoalHours)
+                    : "Not set"}
+                </p>
+              </div>
+              <BtnPrimary
+                onClick={onOpenWeeklyGoal}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                Set weekly target
+              </BtnPrimary>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
+              <div
+                className="rounded-xl p-3"
+                style={{ background: "var(--surface-2)" }}
+              >
+                <p
+                  className="text-[10px] uppercase tracking-wider"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Weekly hour to hit
+                </p>
+                <p
+                  className="text-lg font-semibold mt-2"
+                  style={{
+                    fontFamily: "JetBrains Mono, monospace",
+                    color: "var(--text)",
+                  }}
+                >
+                  {weeklyGoalHours !== null
+                    ? formatHoursNumber(weeklyGoalHours)
+                    : "—"}
+                </p>
+              </div>
+
+              <div
+                className="rounded-xl p-3"
+                style={{ background: "var(--surface-2)" }}
+              >
+                <p
+                  className="text-[10px] uppercase tracking-wider"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Hours worked
+                </p>
+                <p
+                  className="text-lg font-semibold mt-2"
+                  style={{
+                    fontFamily: "JetBrains Mono, monospace",
+                    color: "var(--text)",
+                  }}
+                >
+                  {formatHoursNumber(hoursWorked)}
+                </p>
+              </div>
+
+              <div
+                className="rounded-xl p-3"
+                style={{
+                  background: "var(--green-subtle)",
+                  border: "1px solid rgba(34,197,94,0.14)",
+                }}
+              >
+                <p
+                  className="text-[10px] uppercase tracking-wider"
+                  style={{ color: "var(--text-muted)" }}
+                >
+                  Hours left
+                </p>
+                <p
+                  className="text-lg font-semibold mt-2"
+                  style={{
+                    fontFamily: "JetBrains Mono, monospace",
+                    color:
+                      hoursLeft === null ? "var(--text-muted)" : "var(--green)",
+                  }}
+                >
+                  {hoursLeft === null ? "—" : formatHoursNumber(hoursLeft)}
+                </p>
+              </div>
             </div>
           </Card>
         </div>
@@ -1709,6 +1912,39 @@ export default function App() {
     },
   );
 
+  const [weeklyGoalHours, setWeeklyGoalHours] = useState<number | null>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const value = parsed.weeklyGoalHours;
+        return typeof value === "number" && Number.isFinite(value)
+          ? value
+          : null;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return null;
+  });
+
+  const [weeklyGoalWeekStart, setWeeklyGoalWeekStart] = useState<string | null>(
+    () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          return typeof parsed.weeklyGoalWeekStart === "string"
+            ? parsed.weeklyGoalWeekStart
+            : null;
+        }
+      } catch (e) {
+        // ignore
+      }
+      return null;
+    },
+  );
+
   const [lastCongratsShown, setLastCongratsShown] = useState<string | null>(
     () => {
       try {
@@ -1725,8 +1961,18 @@ export default function App() {
   );
 
   const [showCongrats, setShowCongrats] = useState(false);
+  const [showWeeklyGoalModal, setShowWeeklyGoalModal] = useState(false);
+  const currentWeekStart = getWeekStartDate();
   const shouldAskForJobStart =
     !jobStartDate && (!lastStartPromptDate || lastStartPromptDate !== TODAY);
+  const shouldPromptWeeklyGoal =
+    new Date().getDay() === 0 && weeklyGoalWeekStart !== currentWeekStart;
+
+  useEffect(() => {
+    if (shouldPromptWeeklyGoal) {
+      setShowWeeklyGoalModal(true);
+    }
+  }, [shouldPromptWeeklyGoal]);
 
   // Persist state to localStorage whenever it changes
   useEffect(() => {
@@ -1736,6 +1982,8 @@ export default function App() {
         selectedId,
         jobStartDate,
         lastStartPromptDate,
+        weeklyGoalHours,
+        weeklyGoalWeekStart,
         lastCongratsShown,
       });
       localStorage.setItem(STORAGE_KEY, payload);
@@ -1747,6 +1995,8 @@ export default function App() {
     selectedId,
     jobStartDate,
     lastStartPromptDate,
+    weeklyGoalHours,
+    weeklyGoalWeekStart,
     lastCongratsShown,
   ]);
 
@@ -1801,6 +2051,18 @@ export default function App() {
     } catch (e) {
       // ignore
     }
+  }
+
+  function saveWeeklyGoal(hours: number) {
+    setWeeklyGoalHours(hours);
+    setWeeklyGoalWeekStart(currentWeekStart);
+    setShowWeeklyGoalModal(false);
+  }
+
+  function resetWeeklyGoal() {
+    setWeeklyGoalHours(null);
+    setWeeklyGoalWeekStart(currentWeekStart);
+    setShowWeeklyGoalModal(false);
   }
 
   function addSession(session: Omit<WorkSession, "id">) {
@@ -1981,7 +2243,20 @@ export default function App() {
         onUpdateRate={updateAccountRate}
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        weeklyGoalHours={weeklyGoalHours}
+        onOpenWeeklyGoal={() => setShowWeeklyGoalModal(true)}
       />
+      {showWeeklyGoalModal && (
+        <WeeklyGoalModal
+          defaultHours={weeklyGoalHours}
+          onClose={() => {
+            setWeeklyGoalWeekStart(currentWeekStart);
+            setShowWeeklyGoalModal(false);
+          }}
+          onSave={saveWeeklyGoal}
+          onReset={resetWeeklyGoal}
+        />
+      )}
       {shouldAskForJobStart && (
         <StartJobModal
           onClose={() => {
