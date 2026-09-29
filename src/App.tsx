@@ -1694,6 +1694,21 @@ export default function App() {
     return null;
   });
 
+  const [lastStartPromptDate, setLastStartPromptDate] = useState<string | null>(
+    () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          return parsed.lastStartPromptDate ?? null;
+        }
+      } catch (e) {
+        // ignore
+      }
+      return null;
+    },
+  );
+
   const [lastCongratsShown, setLastCongratsShown] = useState<string | null>(
     () => {
       try {
@@ -1710,6 +1725,8 @@ export default function App() {
   );
 
   const [showCongrats, setShowCongrats] = useState(false);
+  const shouldAskForJobStart =
+    !jobStartDate && (!lastStartPromptDate || lastStartPromptDate !== TODAY);
 
   // Persist state to localStorage whenever it changes
   useEffect(() => {
@@ -1718,13 +1735,20 @@ export default function App() {
         accounts,
         selectedId,
         jobStartDate,
+        lastStartPromptDate,
         lastCongratsShown,
       });
       localStorage.setItem(STORAGE_KEY, payload);
     } catch (e) {
       // storage might be full or unavailable — ignore to avoid crashing
     }
-  }, [accounts, selectedId, jobStartDate, lastCongratsShown]);
+  }, [
+    accounts,
+    selectedId,
+    jobStartDate,
+    lastStartPromptDate,
+    lastCongratsShown,
+  ]);
 
   // check weekly milestone and show congrats modal when appropriate
   useEffect(() => {
@@ -1767,10 +1791,12 @@ export default function App() {
 
   function setStartDate(date: string) {
     setJobStartDate(date);
+    setLastStartPromptDate(TODAY);
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const parsed = raw ? JSON.parse(raw) : {};
       parsed.jobStartDate = date;
+      parsed.lastStartPromptDate = TODAY;
       localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
     } catch (e) {
       // ignore
@@ -1897,9 +1923,11 @@ export default function App() {
           onUpdateSession={updateSession}
           onDeleteSession={deleteSession}
         />
-        {jobStartDate === null && (
+        {shouldAskForJobStart && (
           <StartJobModal
-            onClose={() => setStartDate(TODAY)}
+            onClose={() => {
+              setLastStartPromptDate(TODAY);
+            }}
             onSave={(d) => {
               setStartDate(d);
             }}
@@ -1954,9 +1982,11 @@ export default function App() {
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
       />
-      {jobStartDate === null && (
+      {shouldAskForJobStart && (
         <StartJobModal
-          onClose={() => setStartDate(TODAY)}
+          onClose={() => {
+            setLastStartPromptDate(TODAY);
+          }}
           onSave={(d) => {
             setStartDate(d);
           }}
