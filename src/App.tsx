@@ -29,6 +29,7 @@ interface Account {
   sessions: WorkSession[];
   payouts: Payout[];
   bonuses: Bonus[];
+  inactive?: boolean;
 }
 
 type TimeFilter = "today" | "week" | "month" | "all";
@@ -144,6 +145,17 @@ function accountTotalBonuses(acc: Account): number {
 function accountPendingBalance(acc: Account): number {
   const earned = (accountTotalSecs(acc) / 3600) * acc.ratePerHour;
   return Math.max(0, earned - accountTotalPaid(acc));
+}
+
+function getActiveAccountsCount(accounts: Account[]): number {
+  return accounts.filter((acc) => !acc.inactive).length;
+}
+
+function getActivePendingBalance(accounts: Account[]): number {
+  return accounts.reduce(
+    (total, acc) => total + (acc.inactive ? 0 : accountPendingBalance(acc)),
+    0,
+  );
 }
 
 function getWeekTotalSecs(accounts: Account[]): number {
@@ -866,7 +878,7 @@ function OverviewDashboard({
       a +
       accountTotalPaid(acc) +
       accountTotalBonuses(acc) +
-      accountPendingBalance(acc),
+      (acc.inactive ? 0 : accountPendingBalance(acc)),
     0,
   );
   const weekTotalSecs = getWeekTotalSecs(accounts);
@@ -986,7 +998,7 @@ function OverviewDashboard({
                     color: "var(--text)",
                   }}
                 >
-                  {accounts.length}
+                  {getActiveAccountsCount(accounts)}
                 </p>
                 <p
                   className="text-xs mt-0.5"
@@ -1154,15 +1166,28 @@ function OverviewDashboard({
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex-1 min-w-0 pr-3">
-                      <h3
-                        className="font-semibold text-sm mb-2 truncate"
-                        style={{
-                          fontFamily: "Outfit, sans-serif",
-                          color: "var(--text)",
-                        }}
-                      >
-                        {acc.name}
-                      </h3>
+                      <div className="flex items-center gap-2 mb-2">
+                        <h3
+                          className="font-semibold text-sm truncate"
+                          style={{
+                            fontFamily: "Outfit, sans-serif",
+                            color: "var(--text)",
+                          }}
+                        >
+                          {acc.name}
+                        </h3>
+                        {acc.inactive && (
+                          <span
+                            className="text-[10px] font-bold px-1.5 py-0.5 rounded"
+                            style={{
+                              background: "rgba(239,68,68,0.2)",
+                              color: "#fca5a5",
+                            }}
+                          >
+                            INACTIVE
+                          </span>
+                        )}
+                      </div>
                       <Pill color="primary">
                         <div
                           style={{
@@ -1309,6 +1334,7 @@ function AccountDetail({
   onUpdateRate,
   onUpdateSession,
   onDeleteSession,
+  onToggleInactive,
 }: {
   account: Account;
   onBack: () => void;
@@ -1318,6 +1344,7 @@ function AccountDetail({
   onUpdateRate: (id: string, rate: number) => void;
   onUpdateSession: (id: string, s: Omit<WorkSession, "id">) => void;
   onDeleteSession: (id: string) => void;
+  onToggleInactive: (id: string) => void;
 }) {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("all");
   const [sessionFilter, setSessionFilter] =
@@ -1446,6 +1473,21 @@ function AccountDetail({
             <div className="hidden md:block">
               <BtnSecondary>📥 Download CSV Statement</BtnSecondary>
             </div>
+            <button
+              onClick={() => onToggleInactive(account.id)}
+              className="px-4 py-2 rounded-lg text-xs sm:text-sm font-medium border transition-opacity hover:opacity-85"
+              style={{
+                borderColor: account.inactive
+                  ? "rgba(239,68,68,0.3)"
+                  : "var(--border-strong)",
+                background: account.inactive
+                  ? "rgba(239,68,68,0.08)"
+                  : "transparent",
+                color: account.inactive ? "#fca5a5" : "var(--text-muted)",
+              }}
+            >
+              {account.inactive ? "🔴 Inactive" : "Mark Inactive"}
+            </button>
             <BtnPrimary
               onClick={() => setShowLogModal(true)}
               className="text-xs sm:text-sm flex-1 md:flex-none"
@@ -2181,6 +2223,7 @@ export default function App() {
         sessions: [],
         payouts: [],
         bonuses: [],
+        inactive: false,
       },
     ]);
   }
@@ -2292,6 +2335,12 @@ export default function App() {
     );
   }
 
+  function toggleInactive(id: string) {
+    setAccounts((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, inactive: !a.inactive } : a)),
+    );
+  }
+
   if (currentAccount) {
     const totalSecsAll = accounts.reduce(
       (a, acc) => a + accountTotalSecs(acc),
@@ -2330,6 +2379,7 @@ export default function App() {
           onUpdateRate={updateAccountRate}
           onUpdateSession={updateSession}
           onDeleteSession={deleteSession}
+          onToggleInactive={toggleInactive}
         />
         {shouldAskForJobStart && (
           <StartJobModal
