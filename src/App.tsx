@@ -156,6 +156,82 @@ function getWeekTotalSecs(accounts: Account[]): number {
   }, 0);
 }
 
+function getWeekNumber(date: Date): string {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - d.getDay());
+  return dateToISO(d);
+}
+
+interface WeeklySummary {
+  weekStart: string;
+  weekEnd: string;
+  totalSecs: number;
+  displayLabel: string;
+}
+
+function calculateWeeklySummaries(accounts: Account[]): WeeklySummary[] {
+  const weekMap = new Map<string, number>();
+
+  // Collect all sessions with dates from all accounts
+  accounts.forEach((acc) => {
+    acc.sessions.forEach((session) => {
+      if (session.date) {
+        const weekStart = getWeekNumber(new Date(session.date + "T12:00:00"));
+        const duration = sessionDuration(session);
+        weekMap.set(weekStart, (weekMap.get(weekStart) ?? 0) + duration);
+      }
+    });
+  });
+
+  if (weekMap.size === 0) return [];
+
+  // Convert to array and sort by date descending (most recent first)
+  const summaries = Array.from(weekMap.entries())
+    .map(([weekStart, totalSecs]) => {
+      const weekStartDate = new Date(weekStart + "T00:00:00");
+      const weekEndDate = new Date(weekStartDate);
+      weekEndDate.setDate(weekEndDate.getDate() + 6);
+      return {
+        weekStart,
+        weekEnd: dateToISO(weekEndDate),
+        totalSecs,
+        displayLabel: "", // Will be set below
+      };
+    })
+    .sort((a, b) => b.weekStart.localeCompare(a.weekStart));
+
+  // Add display labels
+  const today = new Date();
+  const currentWeekStart = getWeekNumber(today);
+
+  summaries.forEach((summary) => {
+    if (summary.weekStart === currentWeekStart) {
+      summary.displayLabel = "This Week";
+    } else {
+      const weekDate = new Date(summary.weekStart + "T00:00:00");
+      const daysDiff = Math.floor(
+        (today.getTime() - weekDate.getTime()) / (1000 * 60 * 60 * 24),
+      );
+      const weeksDiff = Math.floor(daysDiff / 7);
+
+      if (weeksDiff === 1) {
+        summary.displayLabel = "Last Week";
+      } else if (weeksDiff === 2) {
+        summary.displayLabel = "2 Weeks Ago";
+      } else if (weeksDiff === 3) {
+        summary.displayLabel = "3 Weeks Ago";
+      } else if (weeksDiff === 4) {
+        summary.displayLabel = "4 Weeks Ago";
+      } else {
+        summary.displayLabel = `${weeksDiff} Weeks Ago`;
+      }
+    }
+  });
+
+  return summaries;
+}
+
 // ─── Seed Data ────────────────────────────────────────────────────────────────
 
 // Start empty so the workspace begins with no sample accounts or payouts.
@@ -361,6 +437,95 @@ function Pill({
     >
       {children}
     </span>
+  );
+}
+
+// ─── Weekly Summary Card ──────────────────────────────────────────────────────
+
+function WeeklySummaryCard({ accounts }: { accounts: Account[] }) {
+  const weeklySummaries = calculateWeeklySummaries(accounts);
+
+  if (weeklySummaries.length === 0) {
+    return (
+      <Card className="p-4 sm:p-6">
+        <p
+          className="text-xs font-medium uppercase tracking-widest mb-4"
+          style={{ color: "var(--text-muted)" }}
+        >
+          Weekly Hours Summary
+        </p>
+        <div className="flex items-center justify-center py-8">
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+            No weekly data yet. Log work sessions to see your weekly breakdown.
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card className="p-4 sm:p-6">
+      <p
+        className="text-xs font-medium uppercase tracking-widest mb-4"
+        style={{ color: "var(--text-muted)" }}
+      >
+        Weekly Hours Summary
+      </p>
+      <div className="space-y-2.5">
+        {weeklySummaries.slice(0, 12).map((week) => {
+          const hours = week.totalSecs / 3600;
+          const wholeHours = Math.floor(hours);
+          const minutes = Math.round((hours - wholeHours) * 60);
+          const displayHours = `${wholeHours}h ${minutes}m`;
+
+          return (
+            <div
+              key={week.weekStart}
+              className="flex items-center justify-between p-3 rounded-lg transition-colors"
+              style={{ background: "var(--surface-2)" }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ background: "var(--primary)" }}
+                />
+                <div className="flex flex-col min-w-0">
+                  <p
+                    className="text-sm font-medium truncate"
+                    style={{ color: "var(--text)" }}
+                  >
+                    {week.displayLabel}
+                  </p>
+                  <p
+                    className="text-xs truncate"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {fmtDate(week.weekStart)} – {fmtDate(week.weekEnd)}
+                  </p>
+                </div>
+              </div>
+              <p
+                className="font-semibold flex-shrink-0 text-right"
+                style={{
+                  fontFamily: "JetBrains Mono, monospace",
+                  color: "var(--primary-hover)",
+                }}
+              >
+                {displayHours}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+      {weeklySummaries.length > 12 && (
+        <p
+          className="text-xs mt-3 text-center"
+          style={{ color: "var(--text-muted)" }}
+        >
+          ... and {weeklySummaries.length - 12} more weeks
+        </p>
+      )}
+    </Card>
   );
 }
 
@@ -875,30 +1040,7 @@ function OverviewDashboard({
               </BtnPrimary>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-5">
-              <div
-                className="rounded-xl p-3"
-                style={{ background: "var(--surface-2)" }}
-              >
-                <p
-                  className="text-[10px] uppercase tracking-wider"
-                  style={{ color: "var(--text-muted)" }}
-                >
-                  Weekly hour to hit
-                </p>
-                <p
-                  className="text-lg font-semibold mt-2"
-                  style={{
-                    fontFamily: "JetBrains Mono, monospace",
-                    color: "var(--text)",
-                  }}
-                >
-                  {weeklyGoalHours !== null
-                    ? formatHoursNumber(weeklyGoalHours)
-                    : "—"}
-                </p>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5">
               <div
                 className="rounded-xl p-3"
                 style={{ background: "var(--surface-2)" }}
@@ -946,6 +1088,10 @@ function OverviewDashboard({
               </div>
             </div>
           </Card>
+        </div>
+
+        <div className="mb-6 sm:mb-8">
+          <WeeklySummaryCard accounts={accounts} />
         </div>
 
         <div className="flex items-center justify-between mb-4 sm:mb-5">
