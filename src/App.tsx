@@ -88,7 +88,7 @@ function dateToISO(date: Date): string {
 function getWeekStartDate(date: Date = new Date()): string {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return dateToISO(d);
 }
 
@@ -117,7 +117,7 @@ function filterByTime(
     const d = new Date(s.date + "T12:00:00");
     if (filter === "week") {
       const start = new Date(now);
-      start.setDate(now.getDate() - now.getDay());
+      start.setDate(now.getDate() - ((now.getDay() + 6) % 7));
       start.setHours(0, 0, 0, 0);
       return d >= start;
     }
@@ -171,7 +171,7 @@ function getWeekTotalSecs(accounts: Account[]): number {
 function getWeekNumber(date: Date): string {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - d.getDay());
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
   return dateToISO(d);
 }
 
@@ -2153,8 +2153,11 @@ export default function App() {
   const currentWeekStart = getWeekStartDate();
   const shouldAskForJobStart =
     !jobStartDate && (!lastStartPromptDate || lastStartPromptDate !== TODAY);
+  const now = new Date();
   const shouldPromptWeeklyGoal =
-    new Date().getDay() === 0 && weeklyGoalWeekStart !== currentWeekStart;
+    now.getDay() === 1 &&
+    now.getHours() >= 8 &&
+    weeklyGoalWeekStart !== currentWeekStart;
 
   useEffect(() => {
     if (shouldPromptWeeklyGoal) {
